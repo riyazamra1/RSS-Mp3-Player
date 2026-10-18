@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Visualizer
 import android.os.Build
 import android.os.Bundle
@@ -219,6 +220,7 @@ fun PlayerContent(
         prefs.getStringSet(FAVOURITES, emptySet())?.toSet() ?: emptySet()
     ) }
     var bassLevel by remember { mutableFloatStateOf(prefs.getInt("bass", 35).toFloat()) }
+    var volumeBoost by remember { mutableFloatStateOf(prefs.getInt("volume_boost", 0).toFloat()) }
     var eqLevels by remember { mutableStateOf(
         listOf(0f, 0f, 0f, 0f, 0f)
     ) }
@@ -289,10 +291,18 @@ fun PlayerContent(
         try { if (audioSessionId > 0) BassBoost(0, audioSessionId).apply { enabled = true } else null }
         catch (_: Exception) { null }
     }
-    DisposableEffect(equalizer, bassBoost) {
+    val loudnessEnhancer = remember(audioSessionId) {
+        try { if (audioSessionId > 0) LoudnessEnhancer(audioSessionId).apply { enabled = true } else null }
+        catch (_: Exception) { null }
+    }
+    LaunchedEffect(loudnessEnhancer, volumeBoost) {
+        try { loudnessEnhancer?.setTargetGain((volumeBoost * 10).toInt()) } catch (_: Exception) {}
+    }
+    DisposableEffect(equalizer, bassBoost, loudnessEnhancer) {
         onDispose {
             try { equalizer?.release() } catch (_: Exception) {}
             try { bassBoost?.release() } catch (_: Exception) {}
+            try { loudnessEnhancer?.release() } catch (_: Exception) {}
         }
     }
 
@@ -377,6 +387,8 @@ fun PlayerContent(
             3 -> EqualizerScreen(
                 equalizer = equalizer,
                 bassBoost = bassBoost,
+                volumeBoost = volumeBoost,
+                onVolumeBoostChange = { volumeBoost = it; prefs.edit().putInt("volume_boost", it.toInt()).apply() },
                 bassLevel = bassLevel,
                 onBassChange = {
                     bassLevel = it
@@ -654,6 +666,8 @@ private fun MiniPlayer(
 private fun EqualizerScreen(
     equalizer: Equalizer?,
     bassBoost: BassBoost?,
+    volumeBoost: Float,
+    onVolumeBoostChange: (Float) -> Unit,
     bassLevel: Float,
     onBassChange: (Float) -> Unit,
     eqLevels: List<Float>,
@@ -663,12 +677,16 @@ private fun EqualizerScreen(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("Sound & equalizer", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text("Adjust bass and five equalizer bands for the current playback session.",
+        Text("Adjust playback gain, bass and five equalizer bands for the current playback session.",
             style = MaterialTheme.typography.bodySmall)
         if (equalizer == null || bassBoost == null) {
             Spacer(Modifier.height(20.dp))
             Text("Sound effects are not supported by this device or the audio session is not ready. Start a track and reopen this screen.")
         } else {
+            Text("Volume boost (+0 to +10 dB)", fontWeight = FontWeight.SemiBold)
+            Slider(value = volumeBoost, onValueChange = onVolumeBoostChange, valueRange = 0f..100f)
+            Text("Boost: +${(volumeBoost / 10f).toInt()} dB. High levels may distort audio or damage hearing; increase carefully.", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Equalizer")
                 Spacer(Modifier.weight(1f))
