@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -177,7 +179,7 @@ fun PlayerContent(
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     val audioSessionId = remember(player) { prefs.getInt("audio_session_id", 0) }
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
-    var title by remember { mutableStateOf(player.mediaMetadata.title?.toString() ?: "Nothing playing") }
+    var title by remember { mutableStateOf(player.mediaMetadata.title?.toString() ?: "Choose a song to play") }
     var artist by remember { mutableStateOf(player.mediaMetadata.artist?.toString() ?: "") }
     var currentId by remember { mutableStateOf(player.currentMediaItem?.mediaId) }
     var shuffle by remember { mutableStateOf(player.shuffleModeEnabled) }
@@ -220,12 +222,12 @@ fun PlayerContent(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
             override fun onMediaMetadataChanged(md: MediaMetadata) {
-                title = md.title?.toString() ?: "Nothing playing"
+                title = md.title?.toString() ?: "Choose a song to play"
                 artist = md.artist?.toString() ?: ""
                 currentId = player.currentMediaItem?.mediaId
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                title = mediaItem?.mediaMetadata?.title?.toString() ?: "Nothing playing"
+                title = mediaItem?.mediaMetadata?.title?.toString() ?: "Choose a song to play"
                 artist = mediaItem?.mediaMetadata?.artist?.toString() ?: ""
                 currentId = mediaItem?.mediaId
             }
@@ -435,14 +437,30 @@ fun PlayerContent(
                                     }.padding(horizontal = 16.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Box(
+                                        Modifier.size(46.dp).background(
+                                            if (selected) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceVariant,
+                                            RoundedCornerShape(14.dp)
+                                        ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("♫", style = MaterialTheme.typography.titleLarge,
+                                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        Text(song.title.ifBlank { "Unknown title" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.titleSmall,
                                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                                        Text("${song.artist} • ${song.album}", maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            style = MaterialTheme.typography.bodySmall)
-                                        Text("${song.folder}  •  ${fmt(song.durationMs)}", maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                                        Text(song.artist.ifBlank { "Unknown artist" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("${song.album.ifBlank { "Unknown album" }}  •  ${fmt(song.durationMs)}", maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     TextButton(onClick = {
                                         val id = song.id.toString()
@@ -574,7 +592,7 @@ private fun EqualizerScreen(
 ) {
     var enabled by remember(equalizer) { mutableStateOf(equalizer?.enabled == true) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Text("SOUND & EQUALIZER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Sound & equalizer", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text("Adjust bass and five equalizer bands for the current playback session.",
             style = MaterialTheme.typography.bodySmall)
@@ -630,7 +648,7 @@ private fun SettingsScreen(
     sortMode: String, onSortChange: (String) -> Unit, onRescan: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-        Text("SETTINGS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
