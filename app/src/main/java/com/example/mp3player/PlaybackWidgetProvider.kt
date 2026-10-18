@@ -1,4 +1,4 @@
-package com.example.mp3player
+package com.riyaz.rssmp3player
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName

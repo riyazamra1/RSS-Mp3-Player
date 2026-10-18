@@ -1,4 +1,4 @@
-package com.example.mp3player
+package com.riyaz.rssmp3player
 
 import android.content.Context
 import android.content.Intent
@@ -17,11 +17,11 @@ import org.json.JSONObject
 
 class PlaybackService : MediaSessionService() {
     companion object {
-        const val ACTION_SLEEP_TIMER = "com.example.mp3player.SLEEP_TIMER"
-        const val ACTION_SLEEP_TRACK = "com.example.mp3player.SLEEP_TRACK"
-        const val ACTION_SLEEP_QUEUE = "com.example.mp3player.SLEEP_QUEUE"
+        const val ACTION_SLEEP_TIMER = "com.riyaz.rssmp3player.SLEEP_TIMER"
+        const val ACTION_SLEEP_TRACK = "com.riyaz.rssmp3player.SLEEP_TRACK"
+        const val ACTION_SLEEP_QUEUE = "com.riyaz.rssmp3player.SLEEP_QUEUE"
         const val EXTRA_SLEEP_MINUTES = "sleep_minutes"
-        const val ACTION_REFRESH_WIDGET = "com.example.mp3player.REFRESH_WIDGET"
+        const val ACTION_REFRESH_WIDGET = "com.riyaz.rssmp3player.REFRESH_WIDGET"
         private const val PREFS = "rss_mp3_player"
         private const val SAVE_QUEUE = "saved_queue"
         private const val SAVE_INDEX = "saved_index"

@@ -1,4 +1,4 @@
-package com.example.mp3player
+package com.riyaz.rssmp3player
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.BroadcastReceiver
@@ -11,11 +11,11 @@ import androidx.media3.session.SessionToken
 
 class WidgetActionReceiver : BroadcastReceiver() {
     companion object {
-        const val ACTION_OPEN = "com.example.mp3player.widget.OPEN"
-        const val ACTION_PREVIOUS = "com.example.mp3player.widget.PREVIOUS"
-        const val ACTION_TOGGLE = "com.example.mp3player.widget.TOGGLE"
-        const val ACTION_NEXT = "com.example.mp3player.widget.NEXT"
-        const val ACTION_QUEUE = "com.example.mp3player.widget.QUEUE"
+        const val ACTION_OPEN = "com.riyaz.rssmp3player.widget.OPEN"
+        const val ACTION_PREVIOUS = "com.riyaz.rssmp3player.widget.PREVIOUS"
+        const val ACTION_TOGGLE = "com.riyaz.rssmp3player.widget.TOGGLE"
+        const val ACTION_NEXT = "com.riyaz.rssmp3player.widget.NEXT"
+        const val ACTION_QUEUE = "com.riyaz.rssmp3player.widget.QUEUE"
         fun pending(context: Context, action: String, id: Int): PendingIntent {
             val i = Intent(context, WidgetActionReceiver::class.java).setAction(action).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
             return PendingIntent.getBroadcast(context, id * 31 + action.hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
