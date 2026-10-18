@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
         refresh()
         setContent {
             val prefs = remember { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
-            var onboardingComplete by remember { mutableStateOf(prefs.getBoolean("onboarding_complete", false)) }
+            var onboardingComplete by remember { mutableStateOf(true) }
             var themeName by remember { mutableStateOf(prefs.getString("theme_name", "Onyx") ?: "Onyx") }
             val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
             val darkTheme = when (themeName) {
@@ -946,7 +946,7 @@ private fun SettingsScreen(
     checkingUpdates: Boolean, onCheckUpdates: () -> Unit,
     onSleepTimer: () -> Unit, onQueue: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         Text("RSS KIT theme", fontWeight = FontWeight.SemiBold)
@@ -998,6 +998,6 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onRescan, modifier = Modifier.fillMaxWidth()) { Text("Library information") }
         Spacer(Modifier.height(16.dp))
-        Text("RSS MP3 Player • Version 1.1", style = MaterialTheme.typography.labelSmall)
+        Text("RSS KIT • RSS Mp3 Player • Version 1.1", style = MaterialTheme.typography.labelSmall)
     }
 }
