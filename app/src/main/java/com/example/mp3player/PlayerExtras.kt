@@ -118,6 +118,7 @@ fun PlayerExtras(
                         }
                     }
                     Spacer(Modifier.height(10.dp))
+                    val waveformColor = MaterialTheme.colorScheme.primary
                     Canvas(Modifier.fillMaxWidth().height(44.dp)) {
                         val bars = 48
                         val gap = 3.dp.toPx()
@@ -126,7 +127,7 @@ fun PlayerExtras(
                             val wave = (kotlin.math.abs(kotlin.math.sin(i * 0.53)) * 0.68 + 0.16).toFloat()
                             val h = size.height * wave
                             drawRoundRect(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = if (player.isPlaying) 0.95f else 0.42f),
+                                color = waveformColor.copy(alpha = if (player.isPlaying) 0.95f else 0.42f),
                                 topLeft = Offset(i * (bw + gap), (size.height - h) / 2f),
                                 size = Size(bw, h),
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(bw / 2f)
