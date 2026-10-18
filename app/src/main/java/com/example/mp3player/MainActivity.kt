@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
         refresh()
         setContent {
             val prefs = remember { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
-            var onboardingComplete by remember { mutableStateOf(true) }
+            var onboardingComplete by remember { mutableStateOf(prefs.getBoolean("onboarding_complete", false)) }
             var themeName by remember { mutableStateOf(prefs.getString("theme_name", "Onyx") ?: "Onyx") }
             val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
             val darkTheme = when (themeName) {
@@ -134,7 +134,8 @@ class MainActivity : ComponentActivity() {
                             onThemeChange = { themeName = it; prefs.edit().putString("theme_name", it).apply() },
                             onDarkThemeChange = { enabled -> themeName = if (enabled) "Dark" else "Light"; prefs.edit().putString("theme_name", themeName).apply() },
                             recordGranted = recordGranted.value,
-                            onRequestRecordPermission = { recordLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                            onRequestRecordPermission = { recordLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                            openNowPlayingOnLaunch = intent.getBooleanExtra("com.riyaz.rssmp3player.OPEN_NOW_PLAYING", false)
                         )
                     }
                 }
@@ -272,7 +273,8 @@ fun PlayerScreen(
     onThemeChange: (String) -> Unit,
     onDarkThemeChange: (Boolean) -> Unit,
     recordGranted: Boolean,
-    onRequestRecordPermission: () -> Unit
+    onRequestRecordPermission: () -> Unit,
+    openNowPlayingOnLaunch: Boolean = false
 ) {
     if (player == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -323,7 +325,10 @@ fun PlayerContent(
     ) }
     var visualizerEnabled by remember { mutableStateOf(prefs.getBoolean("visualizer", true)) }
     var showQueue by remember { mutableStateOf(false) }
-    var showNowPlaying by remember { mutableStateOf(false) }
+    var showNowPlaying by remember { mutableStateOf(openNowPlayingOnLaunch) }
+    LaunchedEffect(openNowPlayingOnLaunch) {
+        if (openNowPlayingOnLaunch) showNowPlaying = true
+    }
     var showSleepTimer by remember { mutableStateOf(false) }
     var actionSong by remember { mutableStateOf<Song?>(null) }
     var propertiesSong by remember { mutableStateOf<Song?>(null) }
