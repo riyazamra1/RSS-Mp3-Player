@@ -16,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -48,7 +49,13 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -322,6 +329,9 @@ fun PlayerContent(
     var propertiesSong by remember { mutableStateOf<Song?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var autoUpdates by remember { mutableStateOf(prefs.getBoolean("auto_updates", true)) }
+    var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var checkingUpdates by remember { mutableStateOf(false) }
+    val updateScope = rememberCoroutineScope()
     var resumePlayback by remember { mutableStateOf(prefs.getBoolean("resume_playback", true)) }
     var restoreAttempted by remember { mutableStateOf(false) }
     var showWhatsNew by remember {
@@ -329,6 +339,16 @@ fun PlayerContent(
         mutableStateOf(prefs.getString("last_whats_new_version", "") != version)
     }
     val visualizerBars = remember { mutableStateListOf<Float>().apply { repeat(36) { add(0.04f) } } }
+
+    LaunchedEffect(autoUpdates) {
+        if (autoUpdates) {
+            delay(900)
+            checkingUpdates = true
+            val found = withContext(Dispatchers.IO) { fetchLatestPlayerRelease(context) }
+            checkingUpdates = false
+            if (found != null) updateInfo = found
+        }
+    }
 
     val mediaItems = remember(songs) {
         songs.map { s ->
@@ -544,6 +564,16 @@ fun PlayerContent(
                 onAutoUpdatesChange = { autoUpdates = it; prefs.edit().putBoolean("auto_updates", it).apply() },
                 resumePlayback = resumePlayback,
                 onResumePlaybackChange = { resumePlayback = it; prefs.edit().putBoolean("resume_playback", it).apply() },
+                checkingUpdates = checkingUpdates,
+                onCheckUpdates = {
+                    updateScope.launch {
+                        checkingUpdates = true
+                        val found = withContext(Dispatchers.IO) { fetchLatestPlayerRelease(context) }
+                        checkingUpdates = false
+                        if (found != null) updateInfo = found
+                        else infoMessage = "No newer RSS Mp3 Player release was found. A published release is required for update delivery."
+                    }
+                },
                 onSleepTimer = { showSleepTimer = true }, onQueue = { showQueue = true }
             )
             else -> {
@@ -696,8 +726,23 @@ fun PlayerContent(
             onMessage = { infoMessage = it }
         )
         infoMessage?.let { message ->
-            AlertDialog(onDismissRequest = { infoMessage = null }, title = { Text("RSS MP3 Player") }, text = { Text(message) },
+            AlertDialog(onDismissRequest = { infoMessage = null }, title = { Text("RSS Mp3 Player") }, text = { Text(message) },
                 confirmButton = { TextButton(onClick = { infoMessage = null }) { Text("OK") } })
+        }
+        updateInfo?.let { (tag, releaseUrl) ->
+            AlertDialog(
+                onDismissRequest = { updateInfo = null },
+                title = { Text("RSS Mp3 Player update available") },
+                text = { Text("Version $tag is available. Open the official release page to download it. Android may ask you to approve installation.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        updateInfo = null
+                        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
+                        catch (_: Exception) { infoMessage = "Could not open the release page." }
+                    }) { Text("View update") }
+                },
+                dismissButton = { TextButton(onClick = { updateInfo = null }) { Text("Later") } }
+            )
         }
         if (showWhatsNew) {
             val acknowledge = {
@@ -709,6 +754,39 @@ fun PlayerContent(
                 text = { Text("• Swipe between tracks\n• Queue and Play Next\n• Sleep timer / auto-close\n• Full Now Playing with local artwork\n• Home-screen playback widget\n• RSS KIT themes\n• Resume last song and position") },
                 confirmButton = { TextButton(onClick = acknowledge) { Text("Got it") } })
         }
+    }
+}
+
+private suspend fun fetchLatestPlayerRelease(context: Context): Pair<String, String>? = withContext(Dispatchers.IO) {
+    var connection: HttpURLConnection? = null
+    try {
+        connection = (URL("https://api.github.com/repos/riyazamra1/RSS-Mp3-Player/releases/latest").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 5000
+            readTimeout = 5000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "RSS-Mp3-Player-Android")
+        }
+        if (connection.responseCode !in 200..299) return@withContext null
+        val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val tag = json.optString("tag_name").trim()
+        val page = json.optString("html_url").trim()
+        if (tag.isBlank() || page.isBlank()) return@withContext null
+        val current = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() } catch (_: Exception) { "1.0" }
+        fun parts(v: String) = v.trim().removePrefix("v").split(".").map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+        val latestParts = parts(tag)
+        val currentParts = parts(current)
+        var comparison = 0
+        for (i in 0 until maxOf(latestParts.size, currentParts.size)) {
+            val a = latestParts.getOrElse(i) { 0 }
+            val b = currentParts.getOrElse(i) { 0 }
+            if (a != b) { comparison = a.compareTo(b); break }
+        }
+        if (comparison > 0) tag to page else null
+    } catch (_: Exception) {
+        null
+    } finally {
+        connection?.disconnect()
     }
 }
 
@@ -865,6 +943,7 @@ private fun SettingsScreen(
     themeName: String, onThemeChange: (String) -> Unit,
     autoUpdates: Boolean, onAutoUpdatesChange: (Boolean) -> Unit,
     resumePlayback: Boolean, onResumePlaybackChange: (Boolean) -> Unit,
+    checkingUpdates: Boolean, onCheckUpdates: () -> Unit,
     onSleepTimer: () -> Unit, onQueue: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -895,6 +974,10 @@ private fun SettingsScreen(
             }
             Switch(checked = resumePlayback, onCheckedChange = onResumePlaybackChange)
         }
+        OutlinedButton(onClick = onCheckUpdates, enabled = !checkingUpdates, modifier = Modifier.fillMaxWidth()) {
+            Text(if (checkingUpdates) "Checking for updates…" else "Check for updates now")
+        }
+        Text("When enabled, the player checks GitHub Releases on startup. Android requires user approval to install updates.", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = onSleepTimer, modifier = Modifier.fillMaxWidth()) { Text("Sleep timer / auto-close") }
         OutlinedButton(onClick = onQueue, modifier = Modifier.fillMaxWidth()) { Text("Manage play queue") }
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
