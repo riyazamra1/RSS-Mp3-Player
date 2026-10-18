@@ -28,7 +28,7 @@
         <receiver android:name=".PlaybackWidgetProvider" android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.mp3player.REFRESH_WIDGET" />
+                <action android:name="com.riyaz.rssmp3player.REFRESH_WIDGET" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/rss_music_widget_info" />
         </receiver>

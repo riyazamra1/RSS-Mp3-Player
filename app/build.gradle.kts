@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.mp3player"
+    namespace = "com.riyaz.rssmp3player"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.mp3player"
+        applicationId = "com.riyaz.rssmp3player"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
