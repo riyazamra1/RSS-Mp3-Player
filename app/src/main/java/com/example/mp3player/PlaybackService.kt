@@ -57,7 +57,16 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = persistPlayback(player)
         })
-        session = MediaSession.Builder(this, player).build()
+        val openPlayerIntent = Intent(this, MainActivity::class.java).apply {
+            action = "com.riyaz.rssmp3player.OPEN_NOW_PLAYING"
+            putExtra("com.riyaz.rssmp3player.OPEN_NOW_PLAYING", true)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openPlayerPendingIntent = android.app.PendingIntent.getActivity(
+            this, 4107, openPlayerIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        session = MediaSession.Builder(this, player).setSessionActivity(openPlayerPendingIntent).build()
         handler.postDelayed(persistRunnable, 5_000L)
         persistPlayback(player)
     }
