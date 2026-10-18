@@ -16,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
         refresh()
         setContent {
             val prefs = remember { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+            var onboardingComplete by remember { mutableStateOf(prefs.getBoolean("onboarding_complete", false)) }
             var themeName by remember { mutableStateOf(prefs.getString("theme_name", "Onyx") ?: "Onyx") }
             val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
             val darkTheme = when (themeName) {
@@ -109,7 +111,12 @@ class MainActivity : ComponentActivity() {
             }
             MaterialTheme(colorScheme = colors) {
                 Surface(Modifier.fillMaxSize()) {
-                    if (!granted.value) {
+                    if (!onboardingComplete) {
+                        OnboardingFlow(onFinish = {
+                            prefs.edit().putBoolean("onboarding_complete", true).apply()
+                            onboardingComplete = true
+                        })
+                    } else if (!granted.value) {
                         PermissionScreen(onGrant = { requestPermissions() })
                     } else {
                         PlayerScreen(
@@ -126,7 +133,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        if (!granted.value) requestPermissions()
     }
 
     override fun onStart() {
@@ -148,6 +154,90 @@ class MainActivity : ComponentActivity() {
         future?.let { MediaController.releaseFuture(it) }
         future = null
         super.onStop()
+    }
+}
+
+@Composable
+private fun OnboardingFlow(onFinish: () -> Unit) {
+    var page by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        delay(1100)
+        if (page == 0) page = 1
+    }
+    val titles = listOf(
+        "Your music, your way",
+        "A player built for listening",
+        "Keep your library in control",
+        "Make it sound like yours"
+    )
+    val descriptions = listOf(
+        "Welcome to RSS Mp3 Player",
+        "Swipe between tracks, manage your queue, and continue where you stopped.",
+        "Browse your music, save favourites, and use the home-screen playback widget.",
+        "Choose a theme, explore audio controls, and set a sleep timer."
+    )
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        if (page == 0) {
+            Spacer(Modifier.weight(1f))
+            Text("♫", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(20.dp))
+            Text("RSS Mp3 Player", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+            Text("Music that moves with you", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            CircularProgressIndicator()
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onFinish) { Text("Skip") }
+            }
+            Crossfade(targetState = page, label = "feature walkthrough") { currentPage ->
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        when (currentPage) {
+                            1 -> "♫"
+                            2 -> "▤"
+                            else -> "◉"
+                        },
+                        style = MaterialTheme.typography.displayLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(28.dp))
+                    Text(titles[currentPage], style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        descriptions[currentPage],
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                for (dot in 1..3) {
+                    Box(
+                        Modifier.size(if (page == dot) 10.dp else 7.dp)
+                            .background(
+                                if (page == dot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(50)
+                            )
+                    )
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = { if (page < 3) page++ else onFinish() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (page == 3) "Start listening" else "Continue") }
+        }
     }
 }
 
@@ -370,7 +460,7 @@ fun PlayerContent(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("RSS Music", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                Text("RSS Mp3 Player", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
                 Text("${songs.size} songs in your library", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             TextButton(onClick = { tab = 4 }) { Text("Settings") }
@@ -576,7 +666,7 @@ fun PlayerContent(
                 val version = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString() } catch (_: Exception) { "1" }
                 prefs.edit().putString("last_whats_new_version", version).apply()
             }
-            AlertDialog(onDismissRequest = acknowledge, title = { Text("What’s New in RSS Music") },
+            AlertDialog(onDismissRequest = acknowledge, title = { Text("What’s New in RSS Mp3 Player") },
                 text = { Text("• Swipe between tracks\n• Queue and Play Next\n• Sleep timer / auto-close\n• Full Now Playing with local artwork\n• Home-screen playback widget\n• RSS KIT themes\n• Resume last song and position") },
                 confirmButton = { TextButton(onClick = acknowledge) { Text("Got it") } })
         }
@@ -616,7 +706,7 @@ private fun MiniPlayer(
                 Text(title.ifBlank { "Choose a song to play" }, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium)
-                Text(artist.ifBlank { "RSS Music Player" }, maxLines = 1,
+                Text(artist.ifBlank { "RSS Mp3 Player" }, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
