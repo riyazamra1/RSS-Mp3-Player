@@ -312,7 +312,7 @@ fun PlayerContent(
                 song.album.contains(query, true) || song.folder.contains(query, true)
             val matchesFolder = tab != 1 || selectedFolder == null || song.folder == selectedFolder
             val matchesAlbum = tab != 2 || selectedAlbum == null || song.album == selectedAlbum
-            val matchesFavourite = tab != 6 || favourites.contains(song.id.toString())
+            val matchesFavourite = tab != 5 || favourites.contains(song.id.toString())
             matchesQuery && matchesFolder && matchesAlbum && matchesFavourite
         }
     }
@@ -324,13 +324,13 @@ fun PlayerContent(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("RSS MP3 PLAYER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                Text("${songs.size} tracks on this device", style = MaterialTheme.typography.bodySmall)
+                Text("RSS Music", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                Text("${songs.size} songs in your library", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            TextButton(onClick = { tab = 5 }) { Text("⚙ Settings") }
+            TextButton(onClick = { tab = 4 }) { Text("Settings") }
         }
 
-        val tabs = listOf("Songs", "Folders", "Albums", "Visualiser", "Equalizer", "Settings", "Favourites")
+        val tabs = listOf("Songs", "Folders", "Albums", "Equalizer", "Settings", "Favourites")
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
             tabs.forEachIndexed { index, label ->
                 Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
@@ -338,17 +338,7 @@ fun PlayerContent(
         }
 
         when (tab) {
-            3 -> VisualizerScreen(
-                title = title, artist = artist, bars = visualizerBars,
-                playing = isPlaying, enabled = visualizerEnabled,
-                onToggle = {
-                    visualizerEnabled = it
-                    prefs.edit().putBoolean("visualizer", it).apply()
-                },
-                recordGranted = recordGranted,
-                onRequestRecordPermission = onRequestRecordPermission
-            )
-            4 -> EqualizerScreen(
+            3 -> EqualizerScreen(
                 equalizer = equalizer,
                 bassBoost = bassBoost,
                 bassLevel = bassLevel,
@@ -365,7 +355,7 @@ fun PlayerContent(
                     try { equalizer?.setBandLevel(band.toShort(), (value * 100).toInt().toShort()) } catch (_: Exception) {}
                 }
             )
-            5 -> SettingsScreen(
+            4 -> SettingsScreen(
                 darkTheme = darkTheme,
                 onDarkThemeChange = onDarkThemeChange,
                 sortMode = sortMode,
@@ -479,6 +469,12 @@ fun PlayerContent(
             onTogglePlay = { if (isPlaying) player.pause() else player.play() },
             onNext = { player.seekToNextMediaItem() },
             shuffle = shuffle, onShuffle = { player.shuffleModeEnabled = !shuffle },
+            visualizerBars = visualizerBars,
+            visualizerEnabled = visualizerEnabled,
+            onVisualizerToggle = {
+                visualizerEnabled = it
+                prefs.edit().putBoolean("visualizer", it).apply()
+            },
             repeat = repeat, onRepeat = {
                 player.repeatMode = when (repeat) {
                     Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
@@ -511,11 +507,37 @@ private fun MiniPlayer(
     position: Long, duration: Long, dragging: Boolean, dragValue: Float,
     onDragStart: () -> Unit, onDragValue: (Float) -> Unit, onSeek: (Long) -> Unit,
     onPrevious: () -> Unit, onTogglePlay: () -> Unit, onNext: () -> Unit,
-    shuffle: Boolean, onShuffle: () -> Unit, repeat: Int, onRepeat: () -> Unit
+    shuffle: Boolean, onShuffle: () -> Unit,
+    visualizerBars: SnapshotStateList<Float>, visualizerEnabled: Boolean,
+    onVisualizerToggle: (Boolean) -> Unit,
+    repeat: Int, onRepeat: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
-        Text(artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title.ifBlank { "Choose a song to play" }, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium)
+                Text(artist.ifBlank { "RSS Music Player" }, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = visualizerEnabled, onCheckedChange = onVisualizerToggle)
+        }
+        val visualizerColor = MaterialTheme.colorScheme.primary
+        Canvas(Modifier.fillMaxWidth().height(42.dp)) {
+            val gap = 2.dp.toPx()
+            val barWidth = ((size.width - gap * (visualizerBars.size - 1)) / visualizerBars.size).coerceAtLeast(1f)
+            visualizerBars.forEachIndexed { index, level ->
+                val h = (size.height * level.coerceIn(0.04f, 1f)).coerceAtLeast(3f)
+                drawRoundRect(
+                    color = visualizerColor.copy(alpha = if (visualizerEnabled) 0.95f else 0.25f),
+                    topLeft = Offset(index * (barWidth + gap), (size.height - h) / 2f),
+                    size = Size(barWidth, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+                )
+            }
+        }
         val maxVal = duration.coerceAtLeast(1L).toFloat()
         Slider(
             value = if (dragging) dragValue.coerceIn(0f, maxVal) else position.toFloat().coerceIn(0f, maxVal),
@@ -537,52 +559,6 @@ private fun MiniPlayer(
                 Player.REPEAT_MODE_ONE -> "🔂 One"
                 else -> "🔁"
             }) }
-        }
-    }
-}
-
-@Composable
-private fun VisualizerScreen(
-    title: String, artist: String, bars: SnapshotStateList<Float>, playing: Boolean,
-    enabled: Boolean, onToggle: (Boolean) -> Unit, recordGranted: Boolean,
-    onRequestRecordPermission: () -> Unit
-) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(20.dp))
-        Text("AUDIO VISUALIZER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(artist, style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(28.dp))
-        val visualizerColor = MaterialTheme.colorScheme.primary
-        Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-            val gap = 4.dp.toPx()
-            val barWidth = ((size.width - gap * (bars.size - 1)) / bars.size).coerceAtLeast(1f)
-            bars.forEachIndexed { index, level ->
-                val h = (size.height * level.coerceIn(0.04f, 1f)).coerceAtLeast(4f)
-                drawRoundRect(
-                    color = if (playing) visualizerColor else Color.Gray,
-                    topLeft = Offset(index * (barWidth + gap), (size.height - h) / 2f),
-                    size = Size(barWidth, h),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
-                )
-            }
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(if (recordGranted) "Live audio waveform" else "Animated visualizer preview")
-        Spacer(Modifier.height(8.dp))
-        Text("Audio capture permission is used only to read playback waveform data for this visualizer.",
-            style = MaterialTheme.typography.bodySmall)
-        if (!recordGranted) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = onRequestRecordPermission) { Text("Enable live visualizer") }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Visualizer")
-            Spacer(Modifier.width(12.dp))
-            Switch(checked = enabled, onCheckedChange = onToggle)
         }
     }
 }
