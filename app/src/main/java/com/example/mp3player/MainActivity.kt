@@ -322,6 +322,8 @@ fun PlayerContent(
     var propertiesSong by remember { mutableStateOf<Song?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var autoUpdates by remember { mutableStateOf(prefs.getBoolean("auto_updates", true)) }
+    var resumePlayback by remember { mutableStateOf(prefs.getBoolean("resume_playback", true)) }
+    var restoreAttempted by remember { mutableStateOf(false) }
     var showWhatsNew by remember {
         val version = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString() } catch (_: Exception) { "1" }
         mutableStateOf(prefs.getString("last_whats_new_version", "") != version)
@@ -364,12 +366,47 @@ fun PlayerContent(
         onDispose { player.removeListener(listener) }
     }
 
-    LaunchedEffect(player) {
+    LaunchedEffect(player, songs, resumePlayback) {
+        if (!restoreAttempted && songs.isNotEmpty()) {
+            if (player.mediaItemCount > 0) {
+                restoreAttempted = true
+            } else if (resumePlayback) {
+                val savedIds = prefs.getString("saved_queue_ids", "").orEmpty()
+                    .split(",").filter { it.isNotBlank() }
+                val byId = songs.associateBy { it.id.toString() }
+                val restoredSongs = savedIds.mapNotNull { byId[it] }
+                val savedCurrentId = prefs.getString("saved_current_id", null)
+                val currentIndex = restoredSongs.indexOfFirst { it.id.toString() == savedCurrentId }
+                if (restoredSongs.isNotEmpty()) {
+                    val restoredItems = restoredSongs.map { song ->
+                        MediaItem.Builder().setMediaId(song.id.toString()).setUri(song.uri)
+                            .setMediaMetadata(MediaMetadata.Builder().setTitle(song.title)
+                                .setArtist(song.artist).setAlbumTitle(song.album)
+                                .setArtworkUri(song.artworkUri).build()).build()
+                    }
+                    player.setMediaItems(restoredItems, currentIndex.coerceAtLeast(0),
+                        prefs.getLong("saved_position_ms", 0L).coerceAtLeast(0L))
+                    player.prepare()
+                    // Restore state only: do not autoplay on launch.
+                }
+                restoreAttempted = true
+            } else {
+                restoreAttempted = true
+            }
+        }
         while (true) {
             position = player.currentPosition
             duration = player.duration.coerceAtLeast(0L)
             currentId = player.currentMediaItem?.mediaId
-            delay(400)
+            if (resumePlayback && player.mediaItemCount > 0 && player.currentMediaItem != null) {
+                prefs.edit()
+                    .putString("saved_queue_ids", (0 until player.mediaItemCount)
+                        .map { player.getMediaItemAt(it).mediaId }.joinToString(","))
+                    .putString("saved_current_id", player.currentMediaItem?.mediaId)
+                    .putLong("saved_position_ms", player.currentPosition.coerceAtLeast(0L))
+                    .apply()
+            }
+            delay(2000)
         }
     }
 
@@ -505,6 +542,8 @@ fun PlayerContent(
                 themeName = themeName, onThemeChange = onThemeChange,
                 autoUpdates = autoUpdates,
                 onAutoUpdatesChange = { autoUpdates = it; prefs.edit().putBoolean("auto_updates", it).apply() },
+                resumePlayback = resumePlayback,
+                onResumePlaybackChange = { resumePlayback = it; prefs.edit().putBoolean("resume_playback", it).apply() },
                 onSleepTimer = { showSleepTimer = true }, onQueue = { showQueue = true }
             )
             else -> {
@@ -825,6 +864,7 @@ private fun SettingsScreen(
     sortMode: String, onSortChange: (String) -> Unit, onRescan: () -> Unit,
     themeName: String, onThemeChange: (String) -> Unit,
     autoUpdates: Boolean, onAutoUpdatesChange: (Boolean) -> Unit,
+    resumePlayback: Boolean, onResumePlaybackChange: (Boolean) -> Unit,
     onSleepTimer: () -> Unit, onQueue: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -847,6 +887,13 @@ private fun SettingsScreen(
                 Text("Updates require a published release signed with the same trusted key. Android controls installation approval.", style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = autoUpdates, onCheckedChange = onAutoUpdatesChange)
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Resume last playback", fontWeight = FontWeight.Medium)
+                Text("Restore the last queue and position without autoplaying.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = resumePlayback, onCheckedChange = onResumePlaybackChange)
         }
         OutlinedButton(onClick = onSleepTimer, modifier = Modifier.fillMaxWidth()) { Text("Sleep timer / auto-close") }
         OutlinedButton(onClick = onQueue, modifier = Modifier.fillMaxWidth()) { Text("Manage play queue") }
