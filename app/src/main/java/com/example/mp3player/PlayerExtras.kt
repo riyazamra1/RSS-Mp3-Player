@@ -148,6 +148,7 @@ fun PlayerExtras(
     propertiesSong?.let { song -> AlertDialog(onDismissRequest = onPropertiesDismiss, title = { Text("Track properties") },
         text = { Column { Text("Title: ${song.title}"); Text("Artist: ${song.artist}"); Text("Album: ${song.album}"); Text("Folder: ${song.folder}"); Text("Duration: ${song.durationMs} ms"); Text("URI: ${song.uri}") } },
         confirmButton = { TextButton(onClick = onPropertiesDismiss) { Text("Close") } })
+    }
 }
 
 private object MediaItemFactory {
