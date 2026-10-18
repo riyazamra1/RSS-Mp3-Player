@@ -244,29 +244,6 @@ fun PlayerContent(
         }
     }
 
-    DisposableEffect(player.audioSessionId) {
-        var eq: Equalizer? = null
-        var bass: BassBoost? = null
-        try {
-            if (player.audioSessionId > 0) {
-                eq = Equalizer(0, player.audioSessionId).apply { enabled = true }
-                bass = BassBoost(0, player.audioSessionId).apply {
-                    setStrength((bassLevel * 10).toInt().toShort())
-                    enabled = true
-                }
-            }
-        } catch (_: Exception) {
-            eq?.release()
-            bass?.release()
-            eq = null
-            bass = null
-        }
-        onDispose {
-            try { eq?.release() } catch (_: Exception) {}
-            try { bass?.release() } catch (_: Exception) {}
-        }
-    }
-
     val equalizer = remember(player.audioSessionId) {
         try { if (player.audioSessionId > 0) Equalizer(0, player.audioSessionId).apply { enabled = true } else null }
         catch (_: Exception) { null }
@@ -577,13 +554,14 @@ private fun VisualizerScreen(
         Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(artist, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(28.dp))
+        val visualizerColor = MaterialTheme.colorScheme.primary
         Canvas(Modifier.fillMaxWidth().height(190.dp)) {
             val gap = 4.dp.toPx()
             val barWidth = ((size.width - gap * (bars.size - 1)) / bars.size).coerceAtLeast(1f)
             bars.forEachIndexed { index, level ->
                 val h = (size.height * level.coerceIn(0.04f, 1f)).coerceAtLeast(4f)
                 drawRoundRect(
-                    color = if (playing) MaterialTheme.colorScheme.primary else Color.Gray,
+                    color = if (playing) visualizerColor else Color.Gray,
                     topLeft = Offset(index * (barWidth + gap), (size.height - h) / 2f),
                     size = Size(barWidth, h),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
