@@ -60,7 +60,7 @@ class PlaybackService : MediaSessionService() {
         val openPlayerIntent = Intent(this, MainActivity::class.java).apply {
             action = "com.riyaz.rssmp3player.OPEN_NOW_PLAYING"
             putExtra("com.riyaz.rssmp3player.OPEN_NOW_PLAYING", true)
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val openPlayerPendingIntent = android.app.PendingIntent.getActivity(
             this, 4107, openPlayerIntent,
