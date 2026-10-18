@@ -175,6 +175,7 @@ fun PlayerContent(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    val audioSessionId = remember(player) { prefs.getInt("audio_session_id", 0) }
     var isPlaying by remember { mutableStateOf(player.isPlaying) }
     var title by remember { mutableStateOf(player.mediaMetadata.title?.toString() ?: "Nothing playing") }
     var artist by remember { mutableStateOf(player.mediaMetadata.artist?.toString() ?: "") }
@@ -244,12 +245,12 @@ fun PlayerContent(
         }
     }
 
-    val equalizer = remember(player.audioSessionId) {
-        try { if (player.audioSessionId > 0) Equalizer(0, player.audioSessionId).apply { enabled = true } else null }
+    val equalizer = remember(audioSessionId) {
+        try { if (audioSessionId > 0) Equalizer(0, audioSessionId).apply { enabled = true } else null }
         catch (_: Exception) { null }
     }
-    val bassBoost = remember(player.audioSessionId) {
-        try { if (player.audioSessionId > 0) BassBoost(0, player.audioSessionId).apply { enabled = true } else null }
+    val bassBoost = remember(audioSessionId) {
+        try { if (audioSessionId > 0) BassBoost(0, audioSessionId).apply { enabled = true } else null }
         catch (_: Exception) { null }
     }
     DisposableEffect(equalizer, bassBoost) {
@@ -259,8 +260,8 @@ fun PlayerContent(
         }
     }
 
-    LaunchedEffect(visualizerEnabled, recordGranted, player.audioSessionId, isPlaying) {
-        if (!visualizerEnabled || !recordGranted || player.audioSessionId <= 0) {
+    LaunchedEffect(visualizerEnabled, recordGranted, audioSessionId, isPlaying) {
+        if (!visualizerEnabled || !recordGranted || audioSessionId <= 0) {
             while (visualizerEnabled && isPlaying && !recordGranted) {
                 for (i in visualizerBars.indices) {
                     visualizerBars[i] = (0.12f + ((i * 13 + System.nanoTime() / 8_000_000L) % 70) / 100f).coerceIn(0.08f, 0.9f)
@@ -271,7 +272,7 @@ fun PlayerContent(
         }
         var visualizer: Visualizer? = null
         try {
-            visualizer = Visualizer(player.audioSessionId).apply {
+            visualizer = Visualizer(audioSessionId).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(v: Visualizer, waveform: ByteArray, samplingRate: Int) {
