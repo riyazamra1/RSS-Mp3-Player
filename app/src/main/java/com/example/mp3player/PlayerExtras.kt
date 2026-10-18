@@ -28,6 +28,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
+import androidx.media3.common.MediaItem
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import java.io.File
 import androidx.media3.session.MediaController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -112,6 +117,7 @@ fun PlayerExtras(
             } })
     }
 
+    var trimSong by remember { mutableStateOf<Song?>(null) }
     actionSong?.let { song ->
         AlertDialog(onDismissRequest = onActionSongDismiss, title = { Text(song.title) }, text = { Text("Track actions") },
             confirmButton = { Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState())) {
@@ -126,6 +132,7 @@ fun PlayerExtras(
                     } catch (e: Exception) { onMessage("Android requires write approval before editing tags: ${e.message}") }
                     onActionSongDismiss()
                 }, modifier = Modifier.fillMaxWidth()) { Text("Edit tags") }
+                TextButton(onClick = { trimSong = song; onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("Trim audio / set ringtone") }
                 TextButton(onClick = { onActionSongDismiss(); onMessage("Use Properties and a file manager to rename this file. Android may require write approval.") }, modifier = Modifier.fillMaxWidth()) { Text("Rename file") }
                 TextButton(onClick = {
                     try {
@@ -144,6 +151,8 @@ fun PlayerExtras(
                 TextButton(onClick = { onActionSongDismiss(); onMessage("Delete requires an Android media-delete approval. No file was deleted.") }, modifier = Modifier.fillMaxWidth()) { Text("Delete (approval required)") }
             } }, dismissButton = { TextButton(onClick = onActionSongDismiss) { Text("Cancel") } })
     }
+
+    trimSong?.let { song -> AudioTrimDialog(song = song, onDismiss = { trimSong = null }, onMessage = onMessage) }
 
     propertiesSong?.let { song -> AlertDialog(onDismissRequest = onPropertiesDismiss, title = { Text("Track properties") },
         text = { Column { Text("Title: ${song.title}"); Text("Artist: ${song.artist}"); Text("Album: ${song.album}"); Text("Folder: ${song.folder}"); Text("Duration: ${song.durationMs} ms"); Text("URI: ${song.uri}") } },
@@ -170,4 +179,64 @@ private fun AlbumCover(song: Song?, modifier: Modifier = Modifier) {
         if (bitmap != null) Image(bitmap!!.asImageBitmap(), contentDescription = "Album artwork", modifier = Modifier.fillMaxSize())
         else Text("♫", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
     }
+}
+
+
+@Composable
+private fun AudioTrimDialog(song: Song, onDismiss: () -> Unit, onMessage: (String) -> Unit) {
+    val context = LocalContext.current
+    val durationSeconds = (song.durationMs / 1000f).coerceAtLeast(1f)
+    var startSeconds by remember { mutableFloatStateOf(0f) }
+    var endSeconds by remember { mutableFloatStateOf(durationSeconds) }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Trim audio") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text(song.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("Start: ${startSeconds.toInt()} sec")
+            Slider(value = startSeconds, onValueChange = { startSeconds = it.coerceAtMost((endSeconds - 1).coerceAtLeast(0f)) }, valueRange = 0f..(durationSeconds - 1f).coerceAtLeast(0f))
+            Text("End: ${endSeconds.toInt()} sec")
+            Slider(value = endSeconds, onValueChange = { endSeconds = it.coerceAtLeast(startSeconds + 1f) }, valueRange = 1f..durationSeconds)
+            Text("Exports a trimmed M4A copy. The original file remains unchanged.", style = MaterialTheme.typography.bodySmall)
+        } },
+        confirmButton = { Button(enabled = !busy && endSeconds > startSeconds, onClick = {
+            busy = true
+            val output = File(context.cacheDir, "rss_trim_${System.currentTimeMillis()}.m4a")
+            val clipped = MediaItem.Builder().setUri(song.uri).setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder().setStartPositionMs((startSeconds * 1000).toLong()).setEndPositionMs((endSeconds * 1000).toLong()).build()
+            ).build()
+            val transformer = Transformer.Builder(context).addListener(object : Transformer.Listener {
+                override fun onCompleted(composition: androidx.media3.transformer.Composition, result: ExportResult) {
+                    try {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Audio.Media.DISPLAY_NAME, "RSS Trim - ${song.title}.m4a")
+                            put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                            put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/RSS MP3 Player")
+                            put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                        }
+                        val uri = context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                        if (uri == null) onMessage("Trim finished, but Android could not create the output file.")
+                        else {
+                            context.contentResolver.openOutputStream(uri)?.use { sink -> output.inputStream().use { it.copyTo(sink) } }
+                            try {
+                                if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(context)) {
+                                    context.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName)))
+                                    onMessage("Trim saved. Allow modify system settings, then choose the saved audio as ringtone.")
+                                } else {
+                                    RingtoneManager.setActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE, uri)
+                                    onMessage("Trimmed audio saved and set as ringtone.")
+                                }
+                            } catch (x: Exception) { onMessage("Trim saved; ringtone permission required: ${x.message}") }
+                        }
+                    } catch (x: Exception) { onMessage("Could not save trimmed audio: ${x.message}") }
+                    output.delete(); busy = false; onDismiss()
+                }
+                override fun onError(composition: androidx.media3.transformer.Composition, result: ExportResult, exception: ExportException) {
+                    output.delete(); busy = false
+                    onMessage("Audio trim failed: ${exception.message ?: "unsupported audio format"}")
+                }
+            }).build()
+            try { transformer.start(clipped, output.absolutePath) }
+            catch (x: Exception) { busy = false; output.delete(); onMessage("Could not start trim: ${x.message}") }
+        }) { Text(if (busy) "Trimming…" else "Trim + set ringtone") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } })
 }
