@@ -331,7 +331,7 @@ fun PlayerScreen(
     if (player == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
     } else {
-        PlayerContent(player, songs, darkTheme, themeName, onThemeChange, onDarkThemeChange, recordGranted, onRequestRecordPermission)
+        PlayerContent(player, songs, darkTheme, themeName, onThemeChange, onDarkThemeChange, recordGranted, onRequestRecordPermission, openNowPlayingOnLaunch)
     }
 }
 
@@ -347,7 +347,8 @@ fun PlayerContent(
     onThemeChange: (String) -> Unit,
     onDarkThemeChange: (Boolean) -> Unit,
     recordGranted: Boolean,
-    onRequestRecordPermission: () -> Unit
+    onRequestRecordPermission: () -> Unit,
+    openNowPlayingOnLaunch: Boolean = false
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
