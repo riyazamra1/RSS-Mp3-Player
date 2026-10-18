@@ -14,8 +14,13 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -85,10 +90,23 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         refresh()
         setContent {
-            var darkTheme by remember {
-                mutableStateOf(getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("dark_theme", true))
+            val prefs = remember { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+            var themeName by remember { mutableStateOf(prefs.getString("theme_name", "Onyx") ?: "Onyx") }
+            val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val darkTheme = when (themeName) {
+                "White", "Light", "Warm Light", "Cool Light" -> false
+                "System Default", "Auto — White + Onyx", "Auto — Light + Dark", "Auto — Light + Black" -> systemDark
+                else -> true
             }
-            MaterialTheme(colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme()) {
+            val colors = when (themeName) {
+                "White", "Light", "Auto — White + Onyx" -> lightColorScheme()
+                "Black", "OLED Black", "Auto — Light + Black" -> darkColorScheme(background = Color.Black, surface = Color.Black, surfaceVariant = Color(0xFF151515), primary = Color(0xFFB7C7FF))
+                "Warm Light" -> lightColorScheme(primary = Color(0xFF865B35), secondary = Color(0xFF795548))
+                "Cool Light" -> lightColorScheme(primary = Color(0xFF315C8C), secondary = Color(0xFF476D91))
+                "High Contrast" -> if (darkTheme) darkColorScheme(onSurface = Color.White, onBackground = Color.White) else lightColorScheme(onSurface = Color.Black, onBackground = Color.Black)
+                else -> if (darkTheme) darkColorScheme() else lightColorScheme()
+            }
+            MaterialTheme(colorScheme = colors) {
                 Surface(Modifier.fillMaxSize()) {
                     if (!granted.value) {
                         PermissionScreen(onGrant = { requestPermissions() })
@@ -97,10 +115,9 @@ class MainActivity : ComponentActivity() {
                             player = controller.value,
                             songs = songs.value,
                             darkTheme = darkTheme,
-                            onDarkThemeChange = {
-                                darkTheme = it
-                                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("dark_theme", it).apply()
-                            },
+                            themeName = themeName,
+                            onThemeChange = { themeName = it; prefs.edit().putString("theme_name", it).apply() },
+                            onDarkThemeChange = { enabled -> themeName = if (enabled) "Dark" else "Light"; prefs.edit().putString("theme_name", themeName).apply() },
                             recordGranted = recordGranted.value,
                             onRequestRecordPermission = { recordLauncher.launch(Manifest.permission.RECORD_AUDIO) }
                         )
@@ -153,6 +170,8 @@ fun PlayerScreen(
     player: MediaController?,
     songs: List<Song>,
     darkTheme: Boolean,
+    themeName: String,
+    onThemeChange: (String) -> Unit,
     onDarkThemeChange: (Boolean) -> Unit,
     recordGranted: Boolean,
     onRequestRecordPermission: () -> Unit
@@ -160,17 +179,20 @@ fun PlayerScreen(
     if (player == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
     } else {
-        PlayerContent(player, songs, darkTheme, onDarkThemeChange, recordGranted, onRequestRecordPermission)
+        PlayerContent(player, songs, darkTheme, themeName, onThemeChange, onDarkThemeChange, recordGranted, onRequestRecordPermission)
     }
 }
 
 private fun fmt(ms: Long): String = "%d:%02d".format(ms.coerceAtLeast(0L) / 60000, (ms.coerceAtLeast(0L) / 1000) % 60)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerContent(
     player: MediaController,
     songs: List<Song>,
     darkTheme: Boolean,
+    themeName: String,
+    onThemeChange: (String) -> Unit,
     onDarkThemeChange: (Boolean) -> Unit,
     recordGranted: Boolean,
     onRequestRecordPermission: () -> Unit
@@ -201,6 +223,17 @@ fun PlayerContent(
         listOf(0f, 0f, 0f, 0f, 0f)
     ) }
     var visualizerEnabled by remember { mutableStateOf(prefs.getBoolean("visualizer", true)) }
+    var showQueue by remember { mutableStateOf(false) }
+    var showNowPlaying by remember { mutableStateOf(false) }
+    var showSleepTimer by remember { mutableStateOf(false) }
+    var actionSong by remember { mutableStateOf<Song?>(null) }
+    var propertiesSong by remember { mutableStateOf<Song?>(null) }
+    var infoMessage by remember { mutableStateOf<String?>(null) }
+    var autoUpdates by remember { mutableStateOf(prefs.getBoolean("auto_updates", true)) }
+    var showWhatsNew by remember {
+        val version = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString() } catch (_: Exception) { "1" }
+        mutableStateOf(prefs.getString("last_whats_new_version", "") != version)
+    }
     val visualizerBars = remember { mutableStateListOf<Float>().apply { repeat(36) { add(0.04f) } } }
 
     val mediaItems = remember(songs) {
@@ -213,6 +246,7 @@ fun PlayerContent(
                         .setTitle(s.title)
                         .setArtist(s.artist)
                         .setAlbumTitle(s.album)
+                        .setArtworkUri(s.artworkUri)
                         .build()
                 ).build()
         }
@@ -365,7 +399,11 @@ fun PlayerContent(
                     sortMode = it
                     prefs.edit().putString("sort", it).apply()
                 },
-                onRescan = { /* list is refreshed when permission state changes; the button explains how to refresh */ }
+                onRescan = { /* MediaStore is refreshed by the app's library refresh path. */ },
+                themeName = themeName, onThemeChange = onThemeChange,
+                autoUpdates = autoUpdates,
+                onAutoUpdatesChange = { autoUpdates = it; prefs.edit().putBoolean("auto_updates", it).apply() },
+                onSleepTimer = { showSleepTimer = true }, onQueue = { showQueue = true }
             )
             else -> {
                 if (tab == 1 && selectedFolder != null) {
@@ -427,14 +465,17 @@ fun PlayerContent(
                             items(visibleSongs, key = { it.id }) { song ->
                                 val selected = currentId == song.id.toString()
                                 Row(
-                                    Modifier.fillMaxWidth().clickable {
+                                    Modifier.fillMaxWidth().combinedClickable(
+                                        onClick = {
                                         val index = songs.indexOfFirst { it.id == song.id }
                                         if (index >= 0) {
                                             player.setMediaItems(mediaItems, index, 0L)
                                             player.prepare()
                                             player.play()
                                         }
-                                    }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        },
+                                        onLongClick = { actionSong = song }
+                                    ).padding(horizontal = 16.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
@@ -499,8 +540,34 @@ fun PlayerContent(
                     Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
                     else -> Player.REPEAT_MODE_OFF
                 }
-            }
+            },
+            onOpenNowPlaying = { showNowPlaying = true },
+            onOpenQueue = { showQueue = true }
         )
+        PlayerExtras(
+            player = player, songs = songs, prefs = prefs,
+            showQueue = showQueue, onQueueDismiss = { showQueue = false },
+            showNowPlaying = showNowPlaying, onNowPlayingDismiss = { showNowPlaying = false },
+            showSleepTimer = showSleepTimer, onSleepTimerDismiss = { showSleepTimer = false },
+            actionSong = actionSong, onActionSongDismiss = { actionSong = null },
+            propertiesSong = propertiesSong, onPropertiesDismiss = { propertiesSong = null },
+            favourites = favourites, onToggleFavourite = { id -> favourites = if (favourites.contains(id)) favourites - id else favourites + id; prefs.edit().putStringSet(FAVOURITES, favourites).apply() },
+            onMessage = { infoMessage = it }
+        )
+        infoMessage?.let { message ->
+            AlertDialog(onDismissRequest = { infoMessage = null }, title = { Text("RSS MP3 Player") }, text = { Text(message) },
+                confirmButton = { TextButton(onClick = { infoMessage = null }) { Text("OK") } })
+        }
+        if (showWhatsNew) {
+            val acknowledge = {
+                showWhatsNew = false
+                val version = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString() } catch (_: Exception) { "1" }
+                prefs.edit().putString("last_whats_new_version", version).apply()
+            }
+            AlertDialog(onDismissRequest = acknowledge, title = { Text("What’s New in RSS Music") },
+                text = { Text("• Swipe between tracks\n• Queue and Play Next\n• Sleep timer / auto-close\n• Full Now Playing with local artwork\n• Home-screen playback widget\n• RSS KIT themes\n• Resume last song and position") },
+                confirmButton = { TextButton(onClick = acknowledge) { Text("Got it") } })
+        }
     }
 }
 
@@ -528,10 +595,11 @@ private fun MiniPlayer(
     shuffle: Boolean, onShuffle: () -> Unit,
     visualizerBars: SnapshotStateList<Float>, visualizerEnabled: Boolean,
     onVisualizerToggle: (Boolean) -> Unit,
-    repeat: Int, onRepeat: () -> Unit
+    repeat: Int, onRepeat: () -> Unit,
+    onOpenNowPlaying: () -> Unit, onOpenQueue: () -> Unit
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenNowPlaying)) {
             Column(Modifier.weight(1f)) {
                 Text(title.ifBlank { "Choose a song to play" }, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold,
@@ -569,6 +637,7 @@ private fun MiniPlayer(
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onShuffle) { Text(if (shuffle) "🔀 On" else "🔀") }
+            TextButton(onClick = onOpenQueue) { Text("Queue") }
             TextButton(onClick = onPrevious) { Text("⏮") }
             Button(onClick = onTogglePlay) { Text(if (playing) "Ⅱ Pause" else "▶ Play") }
             TextButton(onClick = onNext) { Text("⏭") }
@@ -645,18 +714,34 @@ private fun EqualizerScreen(
 @Composable
 private fun SettingsScreen(
     darkTheme: Boolean, onDarkThemeChange: (Boolean) -> Unit,
-    sortMode: String, onSortChange: (String) -> Unit, onRescan: () -> Unit
+    sortMode: String, onSortChange: (String) -> Unit, onRescan: () -> Unit,
+    themeName: String, onThemeChange: (String) -> Unit,
+    autoUpdates: Boolean, onAutoUpdatesChange: (Boolean) -> Unit,
+    onSleepTimer: () -> Unit, onQueue: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
+        Text("RSS KIT theme", fontWeight = FontWeight.SemiBold)
+        val themeOptions = listOf("Material", "White", "Onyx", "Light", "Dark", "Black", "Auto — White + Onyx", "Auto — Light + Dark", "Auto — Light + Black", "System Default", "OLED Black", "Warm Light", "Cool Light", "High Contrast", "Dynamic Color")
+        var themeMenu by remember { mutableStateOf(false) }
+        Box {
+            OutlinedButton(onClick = { themeMenu = true }, modifier = Modifier.fillMaxWidth()) { Text("Theme: $themeName") }
+            DropdownMenu(expanded = themeMenu, onDismissRequest = { themeMenu = false }) {
+                themeOptions.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { onThemeChange(option); themeMenu = false }) }
+            }
+        }
+        Text("Auto themes follow the system light/dark setting.", style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Dark theme", fontWeight = FontWeight.SemiBold)
-                Text("Use a dark or light player appearance", style = MaterialTheme.typography.bodySmall)
+                Text("Automatic update preference", fontWeight = FontWeight.SemiBold)
+                Text("Updates require a published release signed with the same trusted key. Android controls installation approval.", style = MaterialTheme.typography.bodySmall)
             }
-            Switch(checked = darkTheme, onCheckedChange = onDarkThemeChange)
+            Switch(checked = autoUpdates, onCheckedChange = onAutoUpdatesChange)
         }
+        OutlinedButton(onClick = onSleepTimer, modifier = Modifier.fillMaxWidth()) { Text("Sleep timer / auto-close") }
+        OutlinedButton(onClick = onQueue, modifier = Modifier.fillMaxWidth()) { Text("Manage play queue") }
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         Text("Default sort order", fontWeight = FontWeight.SemiBold)
         val sortOptions = listOf("Title A-Z", "Title Z-A", "Artist", "Album", "Longest first")
