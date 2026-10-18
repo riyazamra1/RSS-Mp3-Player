@@ -190,37 +190,55 @@ fun PlayerExtras(
 
     var trimSong by remember { mutableStateOf<Song?>(null) }
     actionSong?.let { song ->
-        AlertDialog(onDismissRequest = onActionSongDismiss, title = { Text(song.title) }, text = { Text("Track actions") },
-            confirmButton = { Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState())) {
-                TextButton(onClick = { val i = songs.indexOfFirst { it.id == song.id }; if (i >= 0) player.addMediaItem(player.mediaItemCount, MediaItemFactory.fromSong(song)); onActionSongDismiss(); onMessage("Added to queue.") }, modifier = Modifier.fillMaxWidth()) { Text("Add to queue") }
-                TextButton(onClick = { val i = songs.indexOfFirst { it.id == song.id }; if (i >= 0) player.addMediaItem((player.currentMediaItemIndex + 1).coerceAtLeast(0), MediaItemFactory.fromSong(song)); onActionSongDismiss(); onMessage("Added to play next.") }, modifier = Modifier.fillMaxWidth()) { Text("Play next") }
-                TextButton(onClick = { onActionSongDismiss(); onMessage("Properties: ${song.title}\nArtist: ${song.artist}\nAlbum: ${song.album}\nFolder: ${song.folder}\nDuration: ${song.durationMs} ms\nURI: ${song.uri}") }, modifier = Modifier.fillMaxWidth()) { Text("Properties") }
-                TextButton(onClick = {
-                    try {
-                        val values = ContentValues().apply { put(MediaStore.Audio.Media.TITLE, song.title + " (edited)") }
-                        val changed = context.contentResolver.update(song.uri, values, null, null)
-                        onMessage(if (changed > 0) "Media title updated." else "Android did not confirm media write access; no change was confirmed.")
-                    } catch (e: Exception) { onMessage("Android requires write approval before editing tags: ${e.message}") }
-                    onActionSongDismiss()
-                }, modifier = Modifier.fillMaxWidth()) { Text("Edit tags") }
-                TextButton(onClick = { trimSong = song; onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("Trim audio / set ringtone") }
-                TextButton(onClick = { onActionSongDismiss(); onMessage("Use Properties and a file manager to rename this file. Android may require write approval.") }, modifier = Modifier.fillMaxWidth()) { Text("Rename file") }
-                TextButton(onClick = {
-                    try {
-                        if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(context)) {
-                            context.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName)))
-                            onMessage("Allow modify system settings, then select Set as ringtone again.")
-                        } else {
-                            RingtoneManager.setActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE, song.uri)
-                            onMessage("Default ringtone updated.")
-                        }
-                    } catch (e: Exception) { onMessage("Could not set ringtone: ${e.message}") }
-                    onActionSongDismiss()
-                }, modifier = Modifier.fillMaxWidth()) { Text("Set as ringtone") }
-                TextButton(onClick = { try { context.startActivity(Intent(Intent.ACTION_SEND).apply { type = "audio/*"; putExtra(Intent.EXTRA_STREAM, song.uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) } catch (_: Exception) { onMessage("Unable to share track.") }; onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("Share") }
-                TextButton(onClick = { onToggleFavourite(song.id.toString()); onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(if (favourites.contains(song.id.toString())) "Remove favourite" else "Add to favourites") }
-                TextButton(onClick = { onActionSongDismiss(); onMessage("Delete requires an Android media-delete approval. No file was deleted.") }, modifier = Modifier.fillMaxWidth()) { Text("Delete (approval required)") }
-            } }, dismissButton = { TextButton(onClick = onActionSongDismiss) { Text("Cancel") } })
+        Dialog(
+            onDismissRequest = onActionSongDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Text(song.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(song.artist.ifBlank { "Unknown artist" }, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(12.dp))
+                    Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                        TextButton(onClick = { player.addMediaItem(player.mediaItemCount, MediaItemFactory.fromSong(song)); onActionSongDismiss(); onMessage("Added to queue.") }, modifier = Modifier.fillMaxWidth()) { Text("Add to queue", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { player.addMediaItem((player.currentMediaItemIndex + 1).coerceAtLeast(0), MediaItemFactory.fromSong(song)); onActionSongDismiss(); onMessage("Added to play next.") }, modifier = Modifier.fillMaxWidth()) { Text("Play next", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { onActionSongDismiss(); onMessage("Properties: ${song.title}\nArtist: ${song.artist}\nAlbum: ${song.album}\nFolder: ${song.folder}\nDuration: ${song.durationMs} ms\nURI: ${song.uri}") }, modifier = Modifier.fillMaxWidth()) { Text("Track properties", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = {
+                            try {
+                                val values = ContentValues().apply { put(MediaStore.Audio.Media.TITLE, song.title + " (edited)") }
+                                val changed = context.contentResolver.update(song.uri, values, null, null)
+                                onMessage(if (changed > 0) "Media title updated." else "Android did not confirm media write access; no change was confirmed.")
+                            } catch (e: Exception) { onMessage("Android requires write approval before editing tags: ${e.message}") }
+                            onActionSongDismiss()
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Edit tags", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { trimSong = song; onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("Trim audio / set ringtone", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { onActionSongDismiss(); onMessage("Android restricts renaming some media files. Use a file manager with media write access to rename this track.") }, modifier = Modifier.fillMaxWidth()) { Text("Rename file", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = {
+                            try {
+                                if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(context)) {
+                                    context.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName)))
+                                    onMessage("Allow modify system settings, then select Set as ringtone again.")
+                                } else {
+                                    RingtoneManager.setActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE, song.uri)
+                                    onMessage("Default ringtone updated.")
+                                }
+                            } catch (e: Exception) { onMessage("Could not set ringtone: ${e.message}") }
+                            onActionSongDismiss()
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Set as ringtone", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { try { context.startActivity(Intent(Intent.ACTION_SEND).apply { type = "audio/*"; putExtra(Intent.EXTRA_STREAM, song.uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) } catch (_: Exception) { onMessage("Unable to share track.") }; onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("Share track", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(onClick = { onToggleFavourite(song.id.toString()); onActionSongDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(if (favourites.contains(song.id.toString())) "Remove favourite" else "Add to favourites", modifier = Modifier.fillMaxWidth()) }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = onActionSongDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                }
+            }
+        }
     }
 
     trimSong?.let { song -> AudioTrimDialog(song = song, onDismiss = { trimSong = null }, onMessage = onMessage) }
