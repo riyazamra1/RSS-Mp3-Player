@@ -275,60 +275,162 @@ private fun AlbumCover(song: Song?, modifier: Modifier = Modifier) {
 private fun AudioTrimDialog(song: Song, onDismiss: () -> Unit, onMessage: (String) -> Unit) {
     val context = LocalContext.current
     val durationSeconds = (song.durationMs / 1000f).coerceAtLeast(1f)
-    var startSeconds by remember { mutableFloatStateOf(0f) }
-    var endSeconds by remember { mutableFloatStateOf(durationSeconds) }
+    var startSeconds by remember(song.id) { mutableFloatStateOf(0f) }
+    var endSeconds by remember(song.id) { mutableFloatStateOf(durationSeconds) }
     var busy by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Trim audio") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text(song.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("Start: ${startSeconds.toInt()} sec")
-            Slider(value = startSeconds, onValueChange = { startSeconds = it.coerceAtMost((endSeconds - 1).coerceAtLeast(0f)) }, valueRange = 0f..(durationSeconds - 1f).coerceAtLeast(0f))
-            Text("End: ${endSeconds.toInt()} sec")
-            Slider(value = endSeconds, onValueChange = { endSeconds = it.coerceAtLeast(startSeconds + 1f) }, valueRange = 1f..durationSeconds)
-            Text("Exports a trimmed M4A copy. The original file remains unchanged.", style = MaterialTheme.typography.bodySmall)
-        } },
-        confirmButton = { Button(enabled = !busy && endSeconds > startSeconds, onClick = {
-            busy = true
-            val output = File(context.cacheDir, "rss_trim_${System.currentTimeMillis()}.m4a")
-            val clipped = MediaItem.Builder().setUri(song.uri).setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder().setStartPositionMs((startSeconds * 1000).toLong()).setEndPositionMs((endSeconds * 1000).toLong()).build()
+    var setRingtone by remember { mutableStateOf(false) }
+    var previewing by remember { mutableStateOf(false) }
+    val previewPlayer = remember(song.uri) { androidx.media3.exoplayer.ExoPlayer.Builder(context).build() }
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var timeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
+
+    DisposableEffect(previewPlayer) {
+        onDispose {
+            timeoutRunnable?.let(mainHandler::removeCallbacks)
+            previewPlayer.release()
+        }
+    }
+
+    fun previewSelection() {
+        try {
+            previewPlayer.stop()
+            val previewClip = MediaItem.Builder().setUri(song.uri).setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs((startSeconds * 1000).toLong())
+                    .setEndPositionMs((endSeconds * 1000).toLong()).build()
             ).build()
-            val transformer = Transformer.Builder(context).addListener(object : Transformer.Listener {
-                override fun onCompleted(composition: androidx.media3.transformer.Composition, result: ExportResult) {
-                    try {
-                        val values = ContentValues().apply {
-                            put(MediaStore.Audio.Media.DISPLAY_NAME, "RSS Trim - ${song.title}.m4a")
-                            put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
-                            put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/RSS MP3 Player")
-                            put(MediaStore.Audio.Media.IS_RINGTONE, 1)
-                        }
-                        val uri = context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-                        if (uri == null) onMessage("Trim finished, but Android could not create the output file.")
-                        else {
-                            context.contentResolver.openOutputStream(uri)?.use { sink -> output.inputStream().use { it.copyTo(sink) } }
+            previewPlayer.setMediaItem(previewClip)
+            previewPlayer.prepare()
+            previewPlayer.play()
+            previewing = true
+            onMessage("Previewing selected trim. Listen before saving.")
+        } catch (e: Exception) {
+            previewing = false
+            onMessage("Could not preview this audio: ${e.message}")
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Trim & preview audio") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                Text(song.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                Text("Start: ${startSeconds.toInt()} sec")
+                Slider(
+                    value = startSeconds,
+                    onValueChange = { startSeconds = it.coerceAtMost((endSeconds - 1).coerceAtLeast(0f)); previewing = false; previewPlayer.pause() },
+                    valueRange = 0f..(durationSeconds - 1f).coerceAtLeast(0f)
+                )
+                Text("End: ${endSeconds.toInt()} sec")
+                Slider(
+                    value = endSeconds,
+                    onValueChange = { endSeconds = it.coerceAtLeast(startSeconds + 1f); previewing = false; previewPlayer.pause() },
+                    valueRange = 1f..durationSeconds
+                )
+                Text("Selected length: ${(endSeconds - startSeconds).toInt()} seconds",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { if (previewing && previewPlayer.isPlaying) { previewPlayer.pause(); previewing = false } else previewSelection() },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (previewing && previewPlayer.isPlaying) "Pause preview" else "▶  Play selected trim") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = setRingtone, onCheckedChange = { setRingtone = it }, enabled = !busy)
+                    Text("Set as ringtone after saving", style = MaterialTheme.typography.bodyMedium)
+                }
+                Text("Preview first, then save. The original track is not modified.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (busy) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("Creating trimmed audio… If the format is unsupported, the operation will stop with an error.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Button(enabled = !busy && endSeconds > startSeconds, onClick = {
+                previewPlayer.pause()
+                previewPlayer.stop()
+                busy = true
+                val output = File(context.cacheDir, "rss_trim_${System.currentTimeMillis()}.m4a")
+                val clipped = MediaItem.Builder().setUri(song.uri).setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs((startSeconds * 1000).toLong())
+                        .setEndPositionMs((endSeconds * 1000).toLong()).build()
+                ).build()
+                var completed = false
+                fun finishWithError(message: String) {
+                    if (completed) return
+                    completed = true
+                    timeoutRunnable?.let(mainHandler::removeCallbacks)
+                    output.delete()
+                    busy = false
+                    onMessage(message)
+                }
+                val timeout = Runnable {
+                    finishWithError("Audio trim timed out after 90 seconds. The source format may not be supported; try another MP3 file.")
+                }
+                timeoutRunnable = timeout
+                mainHandler.postDelayed(timeout, 90_000L)
+
+                val transformer = Transformer.Builder(context).addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: androidx.media3.transformer.Composition, result: ExportResult) {
+                        if (completed) return
+                        try {
+                            val values = ContentValues().apply {
+                                put(MediaStore.Audio.Media.DISPLAY_NAME, "RSS Trim - ${song.title}.m4a")
+                                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                                put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/RSS Mp3 Player")
+                                put(MediaStore.Audio.Media.IS_RINGTONE, if (setRingtone) 1 else 0)
+                            }
+                            val uri = context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                                ?: throw IllegalStateException("Android could not create the output file.")
                             try {
+                                val sink = context.contentResolver.openOutputStream(uri)
+                                    ?: throw IllegalStateException("Android could not open the output file.")
+                                sink.use { stream -> output.inputStream().use { it.copyTo(stream) } }
+                            } catch (e: Exception) {
+                                context.contentResolver.delete(uri, null, null)
+                                throw e
+                            }
+                            if (setRingtone) {
                                 if (android.os.Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(context)) {
                                     context.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + context.packageName)))
-                                    onMessage("Trim saved. Allow modify system settings, then choose the saved audio as ringtone.")
+                                    onMessage("Trimmed audio saved. Allow system-settings access to set it as ringtone.")
                                 } else {
                                     RingtoneManager.setActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE, uri)
                                     onMessage("Trimmed audio saved and set as ringtone.")
                                 }
-                            } catch (x: Exception) { onMessage("Trim saved; ringtone permission required: ${x.message}") }
+                            } else {
+                                onMessage("Trimmed audio saved to Music/RSS Mp3 Player. You can play it from the library.")
+                            }
+                            completed = true
+                            timeoutRunnable?.let(mainHandler::removeCallbacks)
+                            output.delete()
+                            busy = false
+                            onDismiss()
+                        } catch (e: Exception) {
+                            finishWithError("Could not save trimmed audio: ${e.message ?: "unknown error"}")
                         }
-                    } catch (x: Exception) { onMessage("Could not save trimmed audio: ${x.message}") }
-                    output.delete(); busy = false; onDismiss()
+                    }
+                    override fun onError(composition: androidx.media3.transformer.Composition, result: ExportResult, exception: ExportException) {
+                        finishWithError("Audio trim failed: ${exception.message ?: "unsupported audio format"}")
+                    }
+                }).build()
+                try {
+                    transformer.start(clipped, output.absolutePath)
+                } catch (e: Exception) {
+                    finishWithError("Could not start audio trim: ${e.message ?: "unknown error"}")
                 }
-                override fun onError(composition: androidx.media3.transformer.Composition, result: ExportResult, exception: ExportException) {
-                    output.delete(); busy = false
-                    onMessage("Audio trim failed: ${exception.message ?: "unsupported audio format"}")
-                }
-            }).build()
-            try { transformer.start(clipped, output.absolutePath) }
-            catch (x: Exception) { busy = false; output.delete(); onMessage("Could not start trim: ${x.message}") }
-        }) { Text(if (busy) "Trimming…" else "Trim + set ringtone") } },
-        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } })
+            }) { Text(if (busy) "Trimming…" else "Save trimmed audio") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } }
+    )
 }
-
 
 private fun formatTrackTime(ms: Long): String = "%d:%02d".format(ms.coerceAtLeast(0L) / 60000, (ms.coerceAtLeast(0L) / 1000) % 60)
