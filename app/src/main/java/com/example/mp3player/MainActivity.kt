@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val prefs = remember { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
             var onboardingComplete by remember { mutableStateOf(prefs.getBoolean("onboarding_complete", false)) }
+            var registrationComplete by remember { mutableStateOf(prefs.getBoolean("registration_complete", false)) }
             var themeName by remember { mutableStateOf(prefs.getString("theme_name", "Onyx") ?: "Onyx") }
             val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
             val darkTheme = when (themeName) {
@@ -122,6 +123,12 @@ class MainActivity : ComponentActivity() {
                         OnboardingFlow(onFinish = {
                             prefs.edit().putBoolean("onboarding_complete", true).apply()
                             onboardingComplete = true
+                        })
+                    } else if (!registrationComplete) {
+                        RegistrationScreen(onRegister = { fullName, email ->
+                            prefs.edit().putBoolean("registration_complete", true)
+                                .putString("profile_name", fullName).putString("profile_email", email).apply()
+                            registrationComplete = true
                         })
                     } else if (!granted.value) {
                         PermissionScreen(onGrant = { requestPermissions() })
@@ -246,6 +253,51 @@ private fun OnboardingFlow(onFinish: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) { Text(if (page == 3) "Start listening" else "Continue") }
         }
+    }
+}
+
+@Composable
+private fun RegistrationScreen(onRegister: (String, String) -> Unit) {
+    var fullName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+        .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("♫", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(8.dp))
+        Text("Create your RSS Mp3 Player account", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Enter your details to get started.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(20.dp))
+        OutlinedTextField(value = fullName, onValueChange = { fullName = it; error = null }, label = { Text("Full name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value = email, onValueChange = { email = it; error = null }, label = { Text("Email address") }, singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value = password, onValueChange = { password = it; error = null }, label = { Text("Password") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(value = confirmation, onValueChange = { confirmation = it; error = null }, label = { Text("Confirm password") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        if (error != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = {
+            error = when {
+                fullName.isBlank() -> "Enter your full name."
+                !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Enter a valid email address."
+                password.length < 8 -> "Password must contain at least 8 characters."
+                password != confirmation -> "Passwords do not match."
+                else -> null
+            }
+            if (error == null) onRegister(fullName.trim(), email.trim())
+        }, modifier = Modifier.fillMaxWidth()) { Text("Create account") }
+        Spacer(Modifier.height(8.dp))
+        Text("Password is not stored on this device.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
