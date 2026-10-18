@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.provider.Settings
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,12 +22,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.Player
 import androidx.media3.common.MediaItem
 import androidx.media3.transformer.Transformer
@@ -66,31 +70,98 @@ fun PlayerExtras(
 
     if (showNowPlaying) {
         val active = songs.firstOrNull { it.id.toString() == player.currentMediaItem?.mediaId }
-        Dialog(onDismissRequest = onNowPlayingDismiss) {
-            Surface(shape = RoundedCornerShape(28.dp), modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        var nowPosition by remember(player) { mutableLongStateOf(player.currentPosition.coerceAtLeast(0L)) }
+        var nowDuration by remember(player) { mutableLongStateOf(player.duration.coerceAtLeast(0L)) }
+        var seeking by remember { mutableStateOf(false) }
+        var seekValue by remember { mutableFloatStateOf(0f) }
+        LaunchedEffect(player, showNowPlaying) {
+            while (showNowPlaying) {
+                nowPosition = player.currentPosition.coerceAtLeast(0L)
+                nowDuration = player.duration.coerceAtLeast(0L)
+                kotlinx.coroutines.delay(350)
+            }
+        }
+        Dialog(
+            onDismissRequest = onNowPlayingDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(0.dp),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(
+                    Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 22.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("NOW PLAYING", fontWeight = FontWeight.Bold)
+                        TextButton(onClick = onNowPlayingDismiss) { Text("⌄  MINIMIZE") }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { onNowPlayingDismiss(); onMessage("Open the Queue button in the player to manage queued tracks.") }) { Text("Queue") }
+                        Text("NOW PLAYING", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { onNowPlayingDismiss(); onMessage("Open Queue to manage queued tracks.") }) { Text("QUEUE") }
                     }
-                    AlbumCover(active, Modifier.fillMaxWidth().height(250.dp))
-                    Spacer(Modifier.height(16.dp))
-                    Text(player.mediaMetadata.title?.toString() ?: "Choose a song", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(player.mediaMetadata.artist?.toString().orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(Modifier.fillMaxWidth().pointerInput(player.currentMediaItemIndex) {
-                        var distance = 0f
-                        detectHorizontalDragGestures(onDragEnd = {
-                            if (distance < -70f) player.seekToNextMediaItem()
-                            if (distance > 70f) player.seekToPreviousMediaItem()
-                            distance = 0f
-                        }, onHorizontalDrag = { change, amount -> change.consume(); distance += amount })
-                    }, horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { player.seekToPreviousMediaItem() }) { Text("⏮ Previous") }
-                        Button(onClick = { if (player.isPlaying) player.pause() else player.play() }) { Text(if (player.isPlaying) "Ⅱ Pause" else "▶ Play") }
-                        TextButton(onClick = { player.seekToNextMediaItem() }) { Text("Next ⏭") }
+                    Spacer(Modifier.height(12.dp))
+                    Box(Modifier.weight(1f).fillMaxWidth().widthIn(max = 460.dp), contentAlignment = Alignment.Center) {
+                        AlbumCover(active, Modifier.fillMaxSize().padding(4.dp))
                     }
-                    Text("Swipe left or right to change tracks", style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(18.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(player.mediaMetadata.title?.toString() ?: "Choose a song", style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(4.dp))
+                            Text(player.mediaMetadata.artist?.toString().orEmpty().ifBlank { "Unknown artist" },
+                                style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Canvas(Modifier.fillMaxWidth().height(44.dp)) {
+                        val bars = 48
+                        val gap = 3.dp.toPx()
+                        val bw = ((size.width - gap * (bars - 1)) / bars).coerceAtLeast(1f)
+                        for (i in 0 until bars) {
+                            val wave = (kotlin.math.abs(kotlin.math.sin(i * 0.53)) * 0.68 + 0.16).toFloat()
+                            val h = size.height * wave
+                            drawRoundRect(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = if (player.isPlaying) 0.95f else 0.42f),
+                                topLeft = Offset(i * (bw + gap), (size.height - h) / 2f),
+                                size = Size(bw, h),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(bw / 2f)
+                            )
+                        }
+                    }
+                    val maxPosition = nowDuration.coerceAtLeast(1L).toFloat()
+                    Slider(
+                        value = if (seeking) seekValue.coerceIn(0f, maxPosition) else nowPosition.toFloat().coerceIn(0f, maxPosition),
+                        onValueChange = { seeking = true; seekValue = it },
+                        onValueChangeFinished = { player.seekTo(seekValue.toLong()); seeking = false },
+                        valueRange = 0f..maxPosition
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatTrackTime(if (seeking) seekValue.toLong() else nowPosition), style = MaterialTheme.typography.labelSmall)
+                        Text(formatTrackTime(nowDuration), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { player.shuffleModeEnabled = !player.shuffleModeEnabled }) {
+                            Text(if (player.shuffleModeEnabled) "🔀" else "⇄", style = MaterialTheme.typography.titleLarge)
+                        }
+                        IconButton(onClick = { player.seekToPreviousMediaItem() }) { Text("⏮", style = MaterialTheme.typography.headlineMedium) }
+                        FilledIconButton(onClick = { if (player.isPlaying) player.pause() else player.play() },
+                            modifier = Modifier.size(72.dp)) {
+                            Text(if (player.isPlaying) "Ⅱ" else "▶", style = MaterialTheme.typography.headlineMedium)
+                        }
+                        IconButton(onClick = { player.seekToNextMediaItem() }) { Text("⏭", style = MaterialTheme.typography.headlineMedium) }
+                        IconButton(onClick = { player.repeatMode = when (player.repeatMode) {
+                            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                            else -> Player.REPEAT_MODE_OFF
+                        } }) { Text(if (player.repeatMode == Player.REPEAT_MODE_ONE) "🔂" else "🔁", style = MaterialTheme.typography.titleLarge) }
+                    }
+                    Spacer(Modifier.height(20.dp))
                 }
             }
         }
@@ -240,3 +311,6 @@ private fun AudioTrimDialog(song: Song, onDismiss: () -> Unit, onMessage: (Strin
         }) { Text(if (busy) "Trimming…" else "Trim + set ringtone") } },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } })
 }
+
+
+private fun formatTrackTime(ms: Long): String = "%d:%02d".format(ms.coerceAtLeast(0L) / 60000, (ms.coerceAtLeast(0L) / 1000) % 60)
