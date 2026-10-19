@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -36,15 +38,29 @@ jobs:
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon -PversionName=1.2 -PversionCode=3 assembleDebug
 
-      - name: Verify APK exists
+      - name: Verify APK exists and is non-empty
         run: test -s app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload APK
+      - name: Write build metadata
+        run: |
+          mkdir -p build-info
+          printf 'RSS Mp3 Player\nVersion: 1.2\nVersion code: 3\nCommit: %s\nRun: %s\nBuilt at (UTC): %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" > build-info/BUILD.txt
+          cp app/build/outputs/apk/debug/app-debug.apk build-info/RSS-Mp3-Player-debug.apk
+
+      - name: Upload APK and build information
         uses: actions/upload-artifact@v4
         with:
-          name: RSS-MP3-Player-debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: RSS-MP3-Player-v1.2-build-${{ github.run_number }}
+          path: build-info/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
+
+      - name: Build summary
+        run: |
+          echo "## RSS Mp3 Player APK build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: 1.2 (code 3)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APK: verified non-empty; available in the workflow artifact ZIP." >> "$GITHUB_STEP_SUMMARY"
+          echo "- This is a debug-signed APK. It is not a signed production release and may not update an existing install signed with a different key." >> "$GITHUB_STEP_SUMMARY"
