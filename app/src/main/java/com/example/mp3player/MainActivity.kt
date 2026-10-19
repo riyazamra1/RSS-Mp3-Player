@@ -3,6 +3,7 @@ package com.riyaz.rssmp3player
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.app.DownloadManager
 import android.content.pm.PackageManager
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
@@ -11,6 +12,7 @@ import android.media.audiofx.Visualizer
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.Environment
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -61,6 +63,8 @@ import kotlin.math.max
 
 private const val PREFS = "rss_mp3_player"
 private const val FAVOURITES = "favourites"
+
+private data class PlayerUpdate(val tag: String, val pageUrl: String, val apkUrl: String, val notes: String)
 
 class MainActivity : ComponentActivity() {
     private var future: ListenableFuture<MediaController>? = null
@@ -387,7 +391,7 @@ fun PlayerContent(
     var propertiesSong by remember { mutableStateOf<Song?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var autoUpdates by remember { mutableStateOf(prefs.getBoolean("auto_updates", true)) }
-    var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var updateInfo by remember { mutableStateOf<PlayerUpdate?>(null) }
     var checkingUpdates by remember { mutableStateOf(false) }
     val updateScope = rememberCoroutineScope()
     var resumePlayback by remember { mutableStateOf(prefs.getBoolean("resume_playback", true)) }
@@ -787,17 +791,33 @@ fun PlayerContent(
             AlertDialog(onDismissRequest = { infoMessage = null }, title = { Text("RSS Mp3 Player") }, text = { Text(message) },
                 confirmButton = { TextButton(onClick = { infoMessage = null }) { Text("OK") } })
         }
-        updateInfo?.let { (tag, releaseUrl) ->
+        updateInfo?.let { update ->
             AlertDialog(
                 onDismissRequest = { updateInfo = null },
                 title = { Text("RSS Mp3 Player update available") },
-                text = { Text("Version $tag is available. Open the official release page to download it. Android may ask you to approve installation.") },
+                text = { Text("Version ${update.tag} is available. ${update.notes.take(350).ifBlank { "Download the official update package." }}\n\nAndroid will ask you to approve installation after download.") },
                 confirmButton = {
                     TextButton(onClick = {
                         updateInfo = null
-                        try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl))) }
-                        catch (_: Exception) { infoMessage = "Could not open the release page." }
-                    }) { Text("View update") }
+                        try {
+                            val uri = Uri.parse(update.apkUrl)
+                            require(uri.scheme == "https" && uri.host == "github.com" && uri.path.orEmpty().startsWith("/riyazamra1/RSS-Mp3-Player/releases/download/"))
+                            val request = DownloadManager.Request(uri)
+                                .setTitle("RSS Mp3 Player ${update.tag}")
+                                .setDescription("Downloading the official RSS Mp3 Player update")
+                                .setMimeType("application/vnd.android.package-archive")
+                                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                .setAllowedOverMetered(true)
+                                .setAllowedOverRoaming(false)
+                                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "RSS-Mp3-Player-${update.tag}.apk")
+                            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                            manager.enqueue(request)
+                            infoMessage = "Update download started. When Android shows the download-complete notification, tap it to review and install the update."
+                        } catch (_: Exception) {
+                            infoMessage = "Could not start the update download. Open the official release page to download it manually."
+                            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.pageUrl))) } catch (_: Exception) {}
+                        }
+                    }) { Text("Download update") }
                 },
                 dismissButton = { TextButton(onClick = { updateInfo = null }) { Text("Later") } }
             )
@@ -815,21 +835,33 @@ fun PlayerContent(
     }
 }
 
-private suspend fun fetchLatestPlayerRelease(context: Context): Pair<String, String>? = withContext(Dispatchers.IO) {
+private suspend fun fetchLatestPlayerRelease(context: Context): PlayerUpdate? = withContext(Dispatchers.IO) {
     var connection: HttpURLConnection? = null
     try {
         connection = (URL("https://api.github.com/repos/riyazamra1/RSS-Mp3-Player/releases/latest").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 5000
-            readTimeout = 5000
+            connectTimeout = 7000
+            readTimeout = 7000
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("User-Agent", "RSS-Mp3-Player-Android")
         }
         if (connection.responseCode !in 200..299) return@withContext null
         val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        if (json.optBoolean("draft", true) || json.optBoolean("prerelease", true)) return@withContext null
         val tag = json.optString("tag_name").trim()
         val page = json.optString("html_url").trim()
-        if (tag.isBlank() || page.isBlank()) return@withContext null
+        val assets = json.optJSONArray("assets") ?: return@withContext null
+        var apkUrl: String? = null
+        for (i in 0 until assets.length()) {
+            val asset = assets.optJSONObject(i) ?: continue
+            val name = asset.optString("name")
+            val url = asset.optString("browser_download_url")
+            if (name.endsWith(".apk", ignoreCase = true) && url.startsWith("https://github.com/riyazamra1/RSS-Mp3-Player/releases/download/")) {
+                apkUrl = url
+                break
+            }
+        }
+        if (tag.isBlank() || page.isBlank() || apkUrl == null) return@withContext null
         val current = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() } catch (_: Exception) { "1.0" }
         fun parts(v: String) = v.trim().removePrefix("v").split(".").map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
         val latestParts = parts(tag)
@@ -840,7 +872,7 @@ private suspend fun fetchLatestPlayerRelease(context: Context): Pair<String, Str
             val b = currentParts.getOrElse(i) { 0 }
             if (a != b) { comparison = a.compareTo(b); break }
         }
-        if (comparison > 0) tag to page else null
+        if (comparison > 0) PlayerUpdate(tag, page, apkUrl, json.optString("body")) else null
     } catch (_: Exception) {
         null
     } finally {
