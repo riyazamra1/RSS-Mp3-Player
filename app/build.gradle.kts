@@ -11,13 +11,24 @@ android {
         applicationId = "com.riyaz.rssmp3player"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = providers.gradleProperty("versionCode").orElse("2").get().toInt()
+        versionName = providers.gradleProperty("versionName").orElse("1.1").get()
+    }
+
+    signingConfigs {
+        create("release") {
+            val storePath = System.getenv("RSS_ANDROID_KEYSTORE_PATH")
+            if (!storePath.isNullOrBlank()) storeFile = file(storePath)
+            storePassword = System.getenv("RSS_ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("RSS_ANDROID_KEY_ALIAS")
+            keyPassword = System.getenv("RSS_ANDROID_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
